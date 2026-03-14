@@ -45,6 +45,12 @@
   }
   .labels { display: flex; justify-content: space-between; width: 100%; font-size: 0.7rem; color: #5a6a80; margin-top: 2px; }
   .info { font-size: 0.72rem; color: #5a6a80; margin-top: 8px; }
+  .apollo-toggle {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 0.80rem; color: #b0a060; cursor: pointer;
+    margin-top: 6px; user-select: none;
+  }
+  .apollo-toggle input { cursor: pointer; accent-color: #ffd43b; width: 14px; height: 14px; }
 </style>
 </head>
 <body>
@@ -61,6 +67,9 @@
   </div>
 </div>
 <p class="info">Drag the slider to change horizontal launch speed</p>
+<label class="apollo-toggle">
+  <input type="checkbox" id="apolloToggle"> 🌙 Show Apollo trans-lunar trajectory
+</label>
 
 <script>
 const C = document.getElementById('c');
@@ -93,6 +102,31 @@ const stars = [];
   for (let i = 0; i < 140; i++) stars.push({x:r()*W, y:r()*H, sz:r()*1.2+0.2, a:r()*0.5+0.1}); }
 
 let trail = [], proj = null, frac = 0, ghost = [];
+
+// Predict trajectory with arbitrary initial velocity vector
+function predictVec(vx0, vy0) {
+  let x = LX, y = LY, vx = vx0, vy = vy0;
+  const dt = 0.15, pts = [{x, y}];
+  for (let i = 0; i < 24000; i++) {
+    const dx = x - ECX, dy = y - ECY, d = Math.sqrt(dx*dx+dy*dy);
+    if (d < ER * 0.99) break;
+    if (x < -W*0.6 || x > W*1.6 || y < -H*0.8 || y > H*1.6) break;
+    const a = -GM / (d*d*d);
+    vx += a*dx*dt; vy += a*dy*dt;
+    x += vx*dt; y += vy*dt;
+    if (i % 3 === 0) pts.push({x, y});
+  }
+  return pts;
+}
+
+// Apollo TLI: near-escape speed angled ~38° above horizontal (upper-right)
+// Real Apollo TLI ≈ 98.5% of escape velocity
+const APOLLO_ANGLE = -Math.PI * 0.21; // ~38° upward from horizontal
+const apolloSpeed  = V_ESC * 0.985;
+const apolloPath   = predictVec(
+  apolloSpeed * Math.cos(APOLLO_ANGLE),
+  apolloSpeed * Math.sin(APOLLO_ANGLE)
+);
 
 // Preload Earth image
 const earthImg = new Image();
@@ -217,6 +251,57 @@ function draw() {
 
   // Earth
   drawEarth();
+
+  // Apollo trajectory overlay
+  if (document.getElementById('apolloToggle').checked && apolloPath.length > 1) {
+    X.save();
+    // Dashed golden path
+    X.setLineDash([5, 6]);
+    X.lineWidth = 2;
+    X.strokeStyle = 'rgba(255, 210, 80, 0.55)';
+    X.beginPath();
+    X.moveTo(apolloPath[0].x, apolloPath[0].y);
+    for (let i = 1; i < apolloPath.length; i++) {
+      X.lineTo(apolloPath[i].x, apolloPath[i].y);
+    }
+    X.stroke();
+    X.setLineDash([]);
+
+    // Fade-out gradient mask at exit point
+    const last = apolloPath[apolloPath.length - 1];
+    const prev = apolloPath[Math.max(0, apolloPath.length - 60)];
+    const exitGrad = X.createLinearGradient(prev.x, prev.y, last.x, last.y);
+    exitGrad.addColorStop(0, 'rgba(10,14,39,0)');
+    exitGrad.addColorStop(1, 'rgba(10,14,39,0.85)');
+    X.strokeStyle = exitGrad;
+    X.lineWidth = 6;
+    X.beginPath();
+    X.moveTo(prev.x, prev.y); X.lineTo(last.x, last.y);
+    X.stroke();
+
+    // Arrow tip at last visible point
+    const dx = last.x - prev.x, dy = last.y - prev.y;
+    const ang = Math.atan2(dy, dx);
+    const ax = last.x - dx * 0.15, ay = last.y - dy * 0.15;
+    X.fillStyle = 'rgba(255,210,80,0.70)';
+    X.beginPath();
+    X.moveTo(ax + Math.cos(ang)*10, ay + Math.sin(ang)*10);
+    X.lineTo(ax + Math.cos(ang+2.4)*7, ay + Math.sin(ang+2.4)*7);
+    X.lineTo(ax + Math.cos(ang-2.4)*7, ay + Math.sin(ang-2.4)*7);
+    X.closePath(); X.fill();
+
+    // 🌙 label near exit, with speed annotation
+    const lx = Math.min(Math.max(last.x, 30), W - 80);
+    const ly = Math.min(Math.max(last.y - 14, 14), H - 10);
+    X.font = `bold ${Math.round(W*0.022)}px system-ui`;
+    X.fillStyle = 'rgba(255,220,100,0.80)';
+    X.fillText('🌙 Moon', lx - 10, ly);
+    X.font = `${Math.round(W*0.014)}px system-ui`;
+    X.fillStyle = 'rgba(255,210,80,0.50)';
+    X.fillText('Apollo TLI  ~39,000 km/h', lx - 10, ly + 14);
+
+    X.restore();
+  }
 
   // Launch tether (surface → cannon)
   X.save();
