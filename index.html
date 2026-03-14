@@ -68,56 +68,88 @@ const X = C.getContext('2d');
 const sl = document.getElementById('sl');
 const lbl = document.getElementById('lbl');
 
-// Canvas size
 const W = Math.min(680, window.innerWidth - 30);
 const H = Math.round(W * 0.88);
 C.width = W; C.height = H;
 
-// Earth — visible globe in lower center
 const ER = W * 0.22;
 const ECX = W / 2;
 const ECY = H * 0.58;
 
-// Physics
 const GM = ER * ER * 2.0;
-
-// Launch from ISS-like altitude above Earth's surface
-// ISS orbits ~420 km up; Earth radius ~6371 km → ratio ≈ 6.6%
-// We use 9% for clear visual separation
 const LAUNCH_R = ER * 1.09;
 const LX = ECX;
 const LY = ECY - LAUNCH_R;
 
-// Orbital & escape speed at launch altitude
 const V_ORB = Math.sqrt(GM / LAUNCH_R);
 const V_ESC = V_ORB * Math.sqrt(2);
-
-// Slider: speed = frac * V_ESC * 1.15
-// → orbital (frac where speed == V_ORB): 1/(√2 × 1.15) ≈ 0.614
-// → escape  (frac where speed == V_ESC): 1/1.15 ≈ 0.869
 const ORB_FRAC = 1 / (Math.SQRT2 * 1.15);
 const ESC_FRAC = 1 / 1.15;
-
-// Real-world speed labels
-const R_ORB = 27600; // km/h (ISS actual ~27,600 km/h)
 const R_ESC = 40300;
 
 // Stars
 const stars = [];
-{ let s = 7; const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  for (let i = 0; i < 140; i++) stars.push({ x: r()*W, y: r()*H, sz: r()*1.2+0.2, a: r()*0.5+0.1 }); }
+{ let s = 7; const r = () => { s = (s*16807)%2147483647; return s/2147483647; };
+  for (let i = 0; i < 140; i++) stars.push({x:r()*W, y:r()*H, sz:r()*1.2+0.2, a:r()*0.5+0.1}); }
 
 let trail = [], proj = null, frac = 0, ghost = [];
+
+// Preload Earth image
+const earthImg = new Image();
+earthImg.crossOrigin = 'anonymous';
+earthImg.src = 'https://upload.wikimedia.org/wikipedia/commons/2/22/Earth_Western_Hemisphere_transparent_background.png';
+
+function drawEarth() {
+  X.save();
+
+  // === ATMOSPHERE OUTER GLOW (before clip) ===
+  const atm = X.createRadialGradient(ECX, ECY, ER * 0.88, ECX, ECY, ER * 1.18);
+  atm.addColorStop(0,   'rgba(72,148,255,0.00)');
+  atm.addColorStop(0.4, 'rgba(72,148,255,0.25)');
+  atm.addColorStop(0.8, 'rgba(100,180,255,0.12)');
+  atm.addColorStop(1,   'rgba(100,180,255,0.00)');
+  X.fillStyle = atm;
+  X.beginPath(); X.arc(ECX, ECY, ER * 1.18, 0, Math.PI*2); X.fill();
+
+  // Clip everything below to the sphere
+  X.beginPath(); X.arc(ECX, ECY, ER, 0, Math.PI*2); X.clip();
+
+  // === EARTH IMAGE ===
+  const d = ER * 2;
+  if (earthImg.complete && earthImg.naturalWidth > 0) {
+    X.drawImage(earthImg, ECX - ER, ECY - ER, d, d);
+  } else {
+    // Fallback ocean while image loads
+    X.fillStyle = '#1466a3';
+    X.fillRect(ECX-ER, ECY-ER, d, d);
+  }
+
+  // === LIMB DARKENING ===
+  const limb = X.createRadialGradient(ECX, ECY, ER*0.52, ECX, ECY, ER*1.01);
+  limb.addColorStop(0,   'rgba(0,5,20,0.00)');
+  limb.addColorStop(0.65,'rgba(0,5,20,0.04)');
+  limb.addColorStop(1,   'rgba(0,5,20,0.62)');
+  X.fillStyle = limb; X.fillRect(ECX-ER, ECY-ER, d, d);
+
+  // === SPECULAR HIGHLIGHT ===
+  const spec = X.createRadialGradient(ECX - ER*0.30, ECY - ER*0.38, 0, ECX - ER*0.30, ECY - ER*0.38, ER*0.60);
+  spec.addColorStop(0,   'rgba(255,255,255,0.20)');
+  spec.addColorStop(0.4, 'rgba(255,255,255,0.05)');
+  spec.addColorStop(1,   'rgba(255,255,255,0.00)');
+  X.fillStyle = spec; X.fillRect(ECX-ER, ECY-ER, d, d);
+
+  X.restore(); // end clip
+}
 
 function predict(speed) {
   let x = LX, y = LY, vx = speed, vy = 0;
   const dt = 0.15, pts = [{x, y}];
   for (let i = 0; i < 12000; i++) {
-    const dx = x - ECX, dy = y - ECY, d = Math.sqrt(dx*dx+dy*dy);
-    if (d < ER * 0.99) break;
-    if (d > ER * 8) break;
+    const dx = x-ECX, dy = y-ECY, d = Math.sqrt(dx*dx+dy*dy);
+    if (d < ER*0.99) break;
+    if (d > ER*8) break;
     if (i > 300) { const ds = Math.sqrt((x-LX)**2+(y-LY)**2); if (ds < ER*0.06) break; }
-    const a = -GM / (d*d*d);
+    const a = -GM/(d*d*d);
     vx += a*dx*dt; vy += a*dy*dt;
     x += vx*dt; y += vy*dt;
     if (i % 4 === 0) pts.push({x, y});
@@ -128,13 +160,13 @@ function predict(speed) {
 function reset() {
   frac = sl.value / 1000;
   const speed = frac * V_ESC * 1.15;
-  proj = { x: LX, y: LY, vx: speed, vy: 0, alive: true };
+  proj = {x:LX, y:LY, vx:speed, vy:0, alive:true};
   trail = [];
   ghost = predict(speed);
 
   const rKmh = Math.round((frac / ESC_FRAC) * R_ESC);
   let txt = `${rKmh.toLocaleString()} km/h`, cls = 'sub';
-  if (frac >= ESC_FRAC) { txt += ' — Escape velocity! 🚀'; cls = 'esc'; }
+  if (frac >= ESC_FRAC)  { txt += ' — Escape velocity! 🚀'; cls = 'esc'; }
   else if (frac >= ORB_FRAC) { txt += ' — Orbital! 🌍'; cls = 'orb'; }
   lbl.textContent = txt;
   lbl.className = 'speed-display ' + cls;
@@ -146,10 +178,10 @@ function step() {
   for (let i = 0; i < n; i++) {
     const dx = proj.x-ECX, dy = proj.y-ECY, d = Math.sqrt(dx*dx+dy*dy);
     if (d < ER*0.99) { proj.alive = false; return; }
-    if (d > ER*8) { proj.alive = false; return; }
+    if (d > ER*8)    { proj.alive = false; return; }
     const a = -GM/(d*d*d);
     proj.vx += a*dx*dt; proj.vy += a*dy*dt;
-    proj.x += proj.vx*dt; proj.y += proj.vy*dt;
+    proj.x  += proj.vx*dt; proj.y += proj.vy*dt;
     trail.push({x:proj.x, y:proj.y});
     if (trail.length > 6000) trail.shift();
   }
@@ -160,62 +192,48 @@ function color3() {
 }
 
 function draw() {
+  // Background
   X.fillStyle = '#0a0e27';
   X.fillRect(0, 0, W, H);
 
   // Stars
-  for (const s of stars) { X.globalAlpha = s.a; X.fillStyle = '#fff'; X.beginPath(); X.arc(s.x, s.y, s.sz, 0, 7); X.fill(); }
+  for (const s of stars) {
+    X.globalAlpha = s.a; X.fillStyle = '#fff';
+    X.beginPath(); X.arc(s.x, s.y, s.sz, 0, 7); X.fill();
+  }
   X.globalAlpha = 1;
 
-  // Atmosphere
-  const ag = X.createRadialGradient(ECX, ECY, ER, ECX, ECY, ER*1.15);
-  ag.addColorStop(0, 'rgba(80,170,255,0.1)');
-  ag.addColorStop(1, 'rgba(80,170,255,0)');
-  X.fillStyle = ag; X.beginPath(); X.arc(ECX, ECY, ER*1.15, 0, 7); X.fill();
-
-  // ISS orbit ring (faint dashed circle at launch altitude)
+  // ISS orbit ring
   X.save();
-  X.setLineDash([3, 7]);
-  X.strokeStyle = 'rgba(100, 210, 255, 0.18)';
+  X.setLineDash([3,7]);
+  X.strokeStyle = 'rgba(100,210,255,0.20)';
   X.lineWidth = 1.2;
-  X.beginPath();
-  X.arc(ECX, ECY, LAUNCH_R, 0, Math.PI * 2);
-  X.stroke();
+  X.beginPath(); X.arc(ECX, ECY, LAUNCH_R, 0, Math.PI*2); X.stroke();
   X.setLineDash([]);
-  // Label
-  X.fillStyle = 'rgba(100,210,255,0.35)';
-  X.font = `${Math.round(W * 0.015)}px system-ui`;
-  X.fillText('ISS altitude', ECX + LAUNCH_R * 0.72, ECY - LAUNCH_R * 0.72);
+  X.fillStyle = 'rgba(120,210,255,0.40)';
+  X.font = `${Math.round(W*0.016)}px system-ui`;
+  X.fillText('ISS altitude', ECX + LAUNCH_R*0.68, ECY - LAUNCH_R*0.72);
   X.restore();
 
   // Earth
-  const eg = X.createRadialGradient(ECX-ER*0.3, ECY-ER*0.4, ER*0.1, ECX, ECY, ER);
-  eg.addColorStop(0, '#2d6e45'); eg.addColorStop(0.4, '#1e4a55'); eg.addColorStop(1, '#0f2030');
-  X.fillStyle = eg; X.beginPath(); X.arc(ECX, ECY, ER, 0, 7); X.fill();
-  X.strokeStyle = 'rgba(60,150,100,0.5)'; X.lineWidth = 1.5;
-  X.beginPath(); X.arc(ECX, ECY, ER, 0, 7); X.stroke();
+  drawEarth();
 
-  // Continent hints
-  X.fillStyle = 'rgba(50,120,70,0.3)';
-  X.beginPath(); X.arc(ECX - ER*0.15, ECY - ER*0.2, ER*0.25, 0, 7); X.fill();
-  X.beginPath(); X.arc(ECX + ER*0.3, ECY + ER*0.1, ER*0.2, 0, 7); X.fill();
-  X.beginPath(); X.arc(ECX - ER*0.1, ECY + ER*0.35, ER*0.18, 0, 7); X.fill();
-
-  // Launch tower — thin line from surface to launch point
-  X.strokeStyle = 'rgba(255,212,59,0.25)';
+  // Launch tether (surface → cannon)
+  X.save();
+  X.setLineDash([2,3]);
+  X.strokeStyle = 'rgba(255,212,59,0.22)';
   X.lineWidth = 1;
-  X.setLineDash([2, 3]);
-  X.beginPath();
-  X.moveTo(ECX, ECY - ER);
-  X.lineTo(LX, LY);
-  X.stroke();
+  X.beginPath(); X.moveTo(ECX, ECY - ER); X.lineTo(LX, LY); X.stroke();
   X.setLineDash([]);
+  X.restore();
 
   // Ghost trail
   if (ghost.length > 1) {
     const c = color3();
-    X.setLineDash([3, 5]); X.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},0.15)`;
-    X.lineWidth = 1.5; X.beginPath(); X.moveTo(ghost[0].x, ghost[0].y);
+    X.setLineDash([3,5]);
+    X.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},0.15)`;
+    X.lineWidth = 1.5;
+    X.beginPath(); X.moveTo(ghost[0].x, ghost[0].y);
     for (let i = 1; i < ghost.length; i++) X.lineTo(ghost[i].x, ghost[i].y);
     X.stroke(); X.setLineDash([]);
   }
@@ -225,20 +243,19 @@ function draw() {
     const c = color3();
     X.lineWidth = 2.5;
     for (let i = 1; i < trail.length; i++) {
-      const al = Math.max(0.04, (i / trail.length) * 0.9);
+      const al = Math.max(0.04, (i/trail.length)*0.9);
       X.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${al})`;
       X.beginPath(); X.moveTo(trail[i-1].x, trail[i-1].y); X.lineTo(trail[i].x, trail[i].y); X.stroke();
     }
   }
 
-  // Launch marker
+  // Launch marker + cannon
   X.fillStyle = '#ffd43b';
   X.beginPath(); X.arc(LX, LY, 4, 0, 7); X.fill();
   X.strokeStyle = '#ffd43b'; X.lineWidth = 2.5;
-  X.beginPath(); X.moveTo(LX, LY); X.lineTo(LX, LY - 14); X.stroke();
-  // Cannon direction hint
+  X.beginPath(); X.moveTo(LX, LY); X.lineTo(LX, LY-14); X.stroke();
   X.strokeStyle = 'rgba(255,212,59,0.4)'; X.lineWidth = 1.5;
-  X.beginPath(); X.moveTo(LX, LY); X.lineTo(LX + 20, LY); X.stroke();
+  X.beginPath(); X.moveTo(LX, LY); X.lineTo(LX+20, LY); X.stroke();
 
   // Projectile
   if (proj && proj.alive) {
@@ -249,11 +266,10 @@ function draw() {
     X.fillStyle = `rgb(${c})`; X.beginPath(); X.arc(proj.x, proj.y, 4, 0, 7); X.fill();
   }
 
-  // Impact marker
+  // Impact flash
   if (proj && !proj.alive && trail.length > 0) {
     const p = trail[trail.length-1];
-    const d = Math.sqrt((p.x-ECX)**2+(p.y-ECY)**2);
-    if (d < ER*1.05) {
+    if (Math.sqrt((p.x-ECX)**2+(p.y-ECY)**2) < ER*1.05) {
       X.fillStyle = 'rgba(255,180,80,0.5)';
       X.beginPath(); X.arc(p.x, p.y, 8, 0, 7); X.fill();
     }
@@ -263,7 +279,6 @@ function draw() {
 function loop() { step(); draw(); requestAnimationFrame(loop); }
 sl.addEventListener('input', reset);
 
-// Auto-relaunch in orbital range
 setInterval(() => {
   if (proj && !proj.alive && frac >= ORB_FRAC && frac < ESC_FRAC) reset();
 }, 200);
