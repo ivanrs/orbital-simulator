@@ -149,13 +149,15 @@ function drawEarth() {
   X.beginPath(); X.arc(ECX, ECY, ER, 0, Math.PI*2); X.clip();
 
   // === EARTH IMAGE ===
-  const d = ER * 2;
+  // The PNG's solid surface occupies only ~87.5% of the image diameter.
+  // Scale up by 1/0.875 so the visible Earth fills the physics collision radius exactly.
+  const EARTH_SCALE = 1 / 0.875;
+  const d = ER * 2 * EARTH_SCALE;
   if (earthImg.complete && earthImg.naturalWidth > 0) {
-    X.drawImage(earthImg, ECX - ER, ECY - ER, d, d);
+    X.drawImage(earthImg, ECX - ER * EARTH_SCALE, ECY - ER * EARTH_SCALE, d, d);
   } else {
-    // Fallback ocean while image loads
     X.fillStyle = '#1466a3';
-    X.fillRect(ECX-ER, ECY-ER, d, d);
+    X.fillRect(ECX-ER, ECY-ER, ER*2, ER*2);
   }
 
   // === LIMB DARKENING ===
